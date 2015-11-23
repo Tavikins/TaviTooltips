@@ -1,0 +1,5 @@
+<Addon Name="TaviTooltips" Version="0.1" Author="Tavi" APIVersion="11" Description="">
+    <Script Name="TaviTooltips.lua"/>
+    <Form Name="TooltipsForms.xml"/>
+    <ReplaceAddon Name="ToolTips"/>
+</Addon>
