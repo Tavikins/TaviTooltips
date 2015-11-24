@@ -323,6 +323,58 @@ function TaviTooltips:new(o)
 	return o
 end
 
+
+--GeminiHook things
+TaviTooltipsHook = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("TaviTooltipsHook", false, {}, "Gemini:Hook-1.0")
+
+function TaviTooltipsHook:OnEnable()
+  --self:RawHook(Apollo.GetAddon("ToolTips"),"OnGenerateWorldObjectTooltip")
+  self:RawHook(Apollo.GetAddon("ToolTips"),"OnMouseOverUnitChanged")
+  self:RawHook(Apollo.GetAddon("ToolTips"),"CreateCallNames")
+  self:RawHook(Apollo.GetAddon("ToolTips"),"OnUpdateVitals")
+ -- self:RawHook(Apollo.GetAddon("ToolTips"),"UnitTooltipGen")
+  self:RawHook(Apollo.GetAddon("ToolTips"),"AddTimedWindow")
+  self:RawHook(Apollo.GetAddon("ToolTips"),"OnTimer")
+  self:RawHook(Apollo.GetAddon("ToolTips"),"OnPlayerRealmName")
+end
+
+function TaviTooltipsHook:OnGenerateWorldObjectTooltip( wndHandler, wndControl, eToolTipType, unit, strPropName )
+	--self.hooks[Apollo.GetAddon("ToolTips")].OnGenerateWorldObjectTooltip( wndHandler, wndControl, eToolTipType, unit, strPropName )
+	TaviTooltips:OnGenerateWorldObjectTooltip( wndHandler, wndControl, eToolTipType, unit, strPropName )
+end
+function TaviTooltipsHook:OnMouseOverUnitChanged(unit)
+	--self.hooks[Apollo.GetAddon("ToolTips")].OnMouseOverUnitChanged(unit)
+	TaviTooltips:OnMouseOverUnitChanged(unit)
+end
+function TaviTooltipsHook:CreateCallNames()
+	self.hooks[Apollo.GetAddon("ToolTips")].CreateCallNames()
+	TaviTooltips:CreateCallNames()
+end
+function TaviTooltipsHook:OnUpdateVitals()
+	self.hooks[Apollo.GetAddon("ToolTips")].OnUpdateVitals()
+	--TaviTooltips:OnUpdateVitals()
+end
+function TaviTooltipsHook:UnitTooltipGen(wndContainer, unitSource, strProp)
+	--if strProp ~= "" then
+		--self.hooks[Apollo.GetAddon("ToolTips")].UnitTooltipGen(wndContainer, unitSource, strProp)
+	--else
+		--TaviTooltips:UnitTooltipGen(wndContainer, unitSource, strProp)
+	--end
+end
+function TaviTooltipsHook:AddTimedWindow(nStartValue, nStepValue, nStopValue, strDisplayFormat, wndTimed)
+	self.hooks[Apollo.GetAddon("ToolTips")].AddTimedWindow(nStartValue, nStepValue, nStopValue, strDisplayFormat, wndTimed)
+	--TaviTooltips:AddTimedWindow(nStartValue, nStepValue, nStopValue, strDisplayFormat, wndTimed)
+end
+function TaviTooltipsHook:OnTimer()
+	self.hooks[Apollo.GetAddon("ToolTips")].OnTimer()
+	--TaviTooltips:OnTimer()
+end
+function TaviTooltipsHook:OnPlayerRealmName(unit, strRealmName)
+	self.hooks[Apollo.GetAddon("ToolTips")].OnPlayerRealmName(unit, strRealmName)
+	--TaviTooltips:OnPlayerRealmName(unit, strRealmName)
+end
+
+
 function TaviTooltips:Init()
 	Apollo.RegisterAddon(self)
 end
@@ -339,9 +391,10 @@ function TaviTooltips:OnDocumentReady()
 	self.SavedStats = {}
 	tVitals = Unit.GetVitalTable()
 
+
 	Apollo.RegisterEventHandler("PlayerChanged", "OnUpdateVitals", self)
 	Apollo.RegisterEventHandler("MatchEntered", "OnUpdateVitals", self)
-	Apollo.RegisterEventHandler("MouseOverUnitChanged", "OnMouseOverUnitChanged", self)
+	--Apollo.RegisterEventHandler("MouseOverUnitChanged", "OnMouseOverUnitChanged", self)
 	Apollo.RegisterEventHandler("PlayerRealmName", "OnPlayerRealmName", self)
 	
 	self.wndBudgetOverlay = Apollo.LoadForm(self.xmlDoc, "OverlayML", nil, self)
@@ -2265,10 +2318,12 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 		--	if bPropHelper then
 				ndiff = TaviTooltips:GearCompareHelper(strproperty, ngear)
 				if ndiff then
-					if ndiff > 0 then
+					if ndiff > 10 then
 						strdiff = string.format("<T TextColor=\"%s\">(+%s) </T>", kUIGreen, ndiff)
-					elseif ndiff < 0 then
+					elseif ndiff < -10 then
 						strdiff = string.format("<T TextColor=\"%s\">(%s) </T>", kUIRed, ndiff)
+					else
+						strdiff = ""
 					end
 				end
 			--end
@@ -2848,8 +2903,9 @@ function TaviTooltips:OnGenerateWorldObjectTooltip( wndHandler, wndControl, eToo
 end
 
 function TaviTooltips:OnMouseOverUnitChanged(unit)
-	self:UnitTooltipGen(GameLib.GetWorldTooltipContainer(), unit, "")
+	--self:UnitTooltipGen(GameLib.GetWorldTooltipContainer(), unit, "")
 end
+
 
 local ToolTipInstance = TaviTooltips:new()
 ToolTipInstance:Init()
