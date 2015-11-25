@@ -294,16 +294,31 @@ local ktRiskToIcon = {
 	[Unit.CreatureRisk.Major] = {strWnd = "CreatureRisk_High"},
 }
 
-local leftbrace = string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "[")			
-local rightbrace = string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "]")
-local plussign = string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "+")
-local equalsign = string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "=")
+local strleftbrace		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "[")			
+local strrightbrace		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "]")
+local strplussign		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "+")
+local strequalsign		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "=")
 
 local kcrGroupTextColor					= ApolloColor.new("BlizzardBlue")
 local kcrFlaggedFriendlyTextColor 		= karDispositionColors[Unit.CodeEnumDisposition.Friendly]
 local kcrDefaultUnflaggedAllyTextColor 	= karDispositionColors[Unit.CodeEnumDisposition.Friendly]
 local kcrAggressiveEnemyTextColor 		= karDispositionColors[Unit.CodeEnumDisposition.Neutral]
 local kcrNeutralEnemyTextColor 			= ApolloColor.new("DispositionNeutral")
+
+
+local tDefaultSettings = {
+	MergeRunes		= false,
+	GearColor		= kUIBody,
+	RuneColor		= "Green",
+	TotalColor		= "Cyan",
+}
+local MergeRunes = "MergeRunes"
+local GearColor = "GearColor"
+local RuneColor = "RuneColor"
+local TotalColor = "TotalColor"
+local bisDefaulting = false
+
+local tSettings
 
 local tVitals = {}
 
@@ -323,8 +338,109 @@ function TaviTooltips:new(o)
 	return o
 end
 
+function TaviTooltips:Init()
+	Apollo.RegisterAddon(self)
+end
 
---GeminiHook things
+function TaviTooltips:OnRestore(eLevel, tData)
+	if eLevel ~= GameLib.CodeEnumAddonSaveLevel.Account then return end
+	if tData then
+		tSettings = tData
+	end
+end
+
+function TaviTooltips:OnSave(eLevel)
+	if eLevel ~= GameLib.CodeEnumAddonSaveLevel.Account then return end
+	local tData = TableUtil:Copy(tSettings)	
+	return tData
+end
+
+function TaviTooltips:OnLoad()
+    self.xmlDoc = XmlDoc.CreateFromFile("TooltipsForms.xml")
+    self.xmlDoc:RegisterCallback("OnDocumentReady", self)
+end
+
+function TaviTooltips:OnOptionChanged( wndHandler, wndControl, strText )
+	local option = wndHandler:GetName()
+	if option == nil then return end
+	
+	wndHandler:SetTextColor(strText)
+	tSettings[option] = wndHandler:GetText()
+
+end
+
+function TaviTooltips:OnCheckbox( wndHandler, wndControl, eMouseButton )
+	local option = wndHandler:GetName()
+	if option == nil then return end
+	
+	tSettings[option] = wndHandler:IsChecked()
+
+end
+
+function TaviTooltips:OnSlashCommand()
+	self.wndSettings:FindChild("MergeRunes"):SetCheck(tSettings.MergeRunes)
+	self.wndSettings:FindChild("GearColor"):SetText(tSettings.GearColor)
+	self.wndSettings:FindChild("GearColor"):SetTextColor(tSettings.GearColor)
+	self.wndSettings:FindChild("RuneColor"):SetText(tSettings.RuneColor)
+	self.wndSettings:FindChild("RuneColor"):SetTextColor(tSettings.RuneColor)
+	self.wndSettings:FindChild("TotalColor"):SetText(tSettings.TotalColor)
+	self.wndSettings:FindChild("TotalColor"):SetTextColor(tSettings.TotalColor)
+	
+	if bisDefaulting then
+		bisDefaulting = false
+		return
+	end
+	if not self.wndSettings:IsShown() then
+		self.wndSettings:Show(true)
+	else
+		self.wndSettings:Show(false)
+	end
+end	
+
+
+function TaviTooltips:OnDocumentReady()
+    if self.xmlDoc == nil then
+        return
+    end
+
+	if tSettings == nil then
+		tSettings = tDefaultSettings
+	end
+	
+	self.SavedStats = {}
+	tVitals = Unit.GetVitalTable()
+
+
+	Apollo.RegisterEventHandler("PlayerChanged", "OnUpdateVitals", self)
+	Apollo.RegisterEventHandler("MatchEntered", "OnUpdateVitals", self)
+	--Apollo.RegisterEventHandler("MouseOverUnitChanged", "OnMouseOverUnitChanged", self)
+	Apollo.RegisterEventHandler("PlayerRealmName", "OnPlayerRealmName", self)
+	Apollo.RegisterSlashCommand("tavitooltips", "OnSlashCommand", self)
+	Apollo.RegisterSlashCommand("TaviTooltips", "OnSlashCommand", self)
+	Apollo.RegisterSlashCommand("ttt", "OnSlashCommand", self)
+	
+	self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
+
+	local wndTooltip = Apollo.LoadForm(self.xmlDoc, "ItemTooltip_Base", nil, self)
+	local wndTooltipItem = wndTooltip:FindChild("Items")
+
+	knWndHeightBuffer = wndTooltip:GetHeight() - wndTooltipItem:GetHeight()
+
+	wndTooltip:Destroy()
+	wndTooltipItem:Destroy()
+
+	self.timerGeneral = ApolloTimer.Create(1.0, true, "OnTimer", self)
+	self.timerGeneral:Stop()
+
+	self:CreateCallNames()
+
+	self.wndContainer = Apollo.LoadForm("TooltipsForms.xml", "WorldTooltipContainer", nil, self)
+	GameLib.SetWorldTooltipContainer(self.wndContainer)
+end
+
+
+--GeminiHook things ... I don't know if half of this was even necessary, but at least it's not replacing Carbine's ToolTips, so compatability should be okay for dependancies
+
 TaviTooltipsHook = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("TaviTooltipsHook", false, {}, "Gemini:Hook-1.0")
 
 function TaviTooltipsHook:OnEnable()
@@ -375,46 +491,6 @@ function TaviTooltipsHook:OnPlayerRealmName(unit, strRealmName)
 end
 
 
-function TaviTooltips:Init()
-	Apollo.RegisterAddon(self)
-end
-
-function TaviTooltips:OnLoad()
-    self.xmlDoc = XmlDoc.CreateFromFile("TooltipsForms.xml")
-    self.xmlDoc:RegisterCallback("OnDocumentReady", self)
-end
-
-function TaviTooltips:OnDocumentReady()
-    if self.xmlDoc == nil then
-        return
-    end
-	self.SavedStats = {}
-	tVitals = Unit.GetVitalTable()
-
-
-	Apollo.RegisterEventHandler("PlayerChanged", "OnUpdateVitals", self)
-	Apollo.RegisterEventHandler("MatchEntered", "OnUpdateVitals", self)
-	--Apollo.RegisterEventHandler("MouseOverUnitChanged", "OnMouseOverUnitChanged", self)
-	Apollo.RegisterEventHandler("PlayerRealmName", "OnPlayerRealmName", self)
-	
-	self.wndBudgetOverlay = Apollo.LoadForm(self.xmlDoc, "OverlayML", nil, self)
-
-	local wndTooltip = Apollo.LoadForm(self.xmlDoc, "ItemTooltip_Base", nil, self)
-	local wndTooltipItem = wndTooltip:FindChild("Items")
-
-	knWndHeightBuffer = wndTooltip:GetHeight() - wndTooltipItem:GetHeight()
-
-	wndTooltip:Destroy()
-	wndTooltipItem:Destroy()
-
-	self.timerGeneral = ApolloTimer.Create(1.0, true, "OnTimer", self)
-	self.timerGeneral:Stop()
-
-	self:CreateCallNames()
-
-	self.wndContainer = Apollo.LoadForm("TooltipsForms.xml", "WorldTooltipContainer", nil, self)
-	GameLib.SetWorldTooltipContainer(self.wndContainer)
-end
 
 function TaviTooltips:OnPlayerRealmName(unit, strRealmName)
 	local tCallback = self.tRealmNamePendingCallbacks[unit:GetId()]
@@ -479,6 +555,10 @@ end
 function TaviTooltips:ClearSave()
 	self.SavedStats = {}
 end
+
+
+--Carbine's main tooltip mega-function
+
 
 function TaviTooltips:UnitTooltipGen(wndContainer, unitSource, strProp)
 	TaviTooltips.SavedStats = {}
@@ -1455,19 +1535,6 @@ local function ItemTooltipBudgetPropHelper(wndParent, tblSortedBudgetPropList, b
 		local l, t, r, b  = wndBudgetFirst:GetAnchorOffsets()
 		wndBudgetOverlay:SetAnchorOffsets(l , t, r + 20 , b)
 		
-		--[[
-		if statdiff ~= 0 then
-			local wut = TaviTooltips:GearCompareHelper(strProperty,nVal)
-			if wut then
-				Print(wut)
-			else
-				Print("Nope")
-			end
-		end
-		]]
-		
-		
-		--TaviTooltips:GearCompareHelper(strProperty,nVal)
 		
 		tTotalStats[strProperty] = {
 			window = wndBudgetFirst,
@@ -1478,59 +1545,8 @@ local function ItemTooltipBudgetPropHelper(wndParent, tblSortedBudgetPropList, b
 			equiped = equipedvalue
 		}
 
-		-- Derived if there are any
-		--[[
-		if tCur.nDiff and bUseDiff and not tItemInfo.arRandomProperties then
-			for idxD, tCurD in pairs(tCur.arDerived or {}) do
-				local wndD = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "SimpleRowSmallML", wndParent)
-
-				local strLineD = ""
-				local nValD = tCurD.nValue or 0
-				local strPropertyNameD = Item.GetPropertyName(tCurD.eProperty)
-
-				if not tCurD.nDiff or not bUseDiff or tCurD.nDiff == 0 then
-					strLineD = string.format("<T TextColor=\"%s\">%s%s</T>", kUIYellow, kstrTab, String_GetWeaselString(Apollo.GetString("Tooltips_StatFloat"), nValD, strPropertyNameD))
-				end
-
-				if strLineD == "" then -- Implicit bUseDiff
-					local nDiffRoundD = (math.floor(tCurD.nDiff * 10)) / 10
-					if nDiffRoundD >= 0 and nValD >= nDiffRoundD then
-						local strNewDiff = String_GetWeaselString(Apollo.GetString("Tooltips_StatDiffNewFloat"), nValD, strPropertyNameD, nDiffRoundD)
-						strLineD = string.format("<T TextColor=\"%s\">%s%s</T>", kUIGreen, kstrTab, strNewDiff)
-					elseif nDiffRoundD >= 0 then
-						local strDiff = string.format("<T TextColor=\"%s\">%s</T>", kUIGreen, String_GetWeaselString(Apollo.GetString("Tooltips_StatUpFloat"), nDiffRoundD))
-						strLineD = string.format("<T TextColor=\"%s\">%s%s</T>", kUIYellow, kstrTab, String_GetWeaselString(Apollo.GetString("Tooltips_StatDiffFloat"),nValD, strPropertyNameD, strDiff))
-					elseif nValD == 0 then
-						local strEven = String_GetWeaselString(Apollo.GetString("Tooltips_StatEvenFloat"), nValD, strPropertyNameD, nDiffRoundD)
-						strLineD = string.format("<T TextColor=\"%s\">%s%s</T>", kUIRed, kstrTab, strEven)
-					else
-						local strDiff = string.format("<T TextColor=\"%s\">%s</T>", kUIRed, String_GetWeaselString(Apollo.GetString("Tooltips_StatDownFloat"), nDiffRoundD))
-						strLineD = string.format("<T TextColor=\"%s\">%s%s</T>", kUIYellow, kstrTab, String_GetWeaselString(Apollo.GetString("Tooltips_StatDiffFloat"), nValD, strPropertyNameD, strDiff))
-					end
-				end
-
-				wndD:SetAML(string.format("<T Font=\"CRB_InterfaceSmall\">%s</T>", strLineD))
-				wndD:SetHeightToContentHeight()
-			end
-		end
-		]]--
 	end
 
-	--[[
-	if tItemInfo.arRandomProperties then
-		for idx, tData in pairs(tItemInfo.arRandomProperties) do
-			if not bMadeHeader then
-				bMadeHeader = true
-				ItemTooltipSeparatorSmallLineHelper(wndParent)
-			end
-
-			local wnd = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "SimpleRowSmallML", wndParent)
-			wnd:SetAML(string.format("<P Font=\"CRB_InterfaceSmall\" TextColor=\"%s\">%s</P>", kUIBody, String_GetWeaselString(Apollo.GetString("Tooltips_PlusProperty"), tData.strName)))
-
-			wnd:SetHeightToContentHeight()
-		end
-	end
-	]]--
 end
 
 -- #############################
@@ -1620,28 +1636,6 @@ local function ItemTooltipSpellEffectHelper(wndParent, tItemInfo)
 		wnd:SetAnchorOffsets(nLeft, nTop, nRight, nTop + nHeight)
 	end
 	
-	-- Ability Chip Info
-	--[[
-	if tItemInfo.tChipInfo and tItemInfo.tChipInfo.arSpells then
-		for idx, tCur in pairs(tItemInfo.tChipInfo.arSpells) do
-			local wnd = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "SimpleRowSmallML", wndParent)
-			local strResult = ""
-			if tCur.bActivate then
-				strResult = String_GetWeaselString(Apollo.GetString("Tooltips_OnUse"), tCur.strName)
-			elseif tCur.bOnEquip then
-				strResult = String_GetWeaselString(Apollo.GetString("Tooltips_OnSpecial"), tCur.strName)
-			elseif tCur.bProc then
-				strResult = String_GetWeaselString(Apollo.GetString("Tooltips_OnSpecial"), tCur.strName)
-			end
-
-			if strResult ~= "" then
-				local strFinal = String_GetWeaselString(Apollo.GetString("Tooltips_ItemSpellEffect"), strResult, (tCur.strFlavor or ""))
-				wnd:SetAML(string.format("<P Font=\"CRB_InterfaceSmall\" TextColor=\"%s\">%s</P>", kUIBody, strFinal))
-				wnd:SetHeightToContentHeight()
-			end
-		end
-	end
-	]]--
 end
 
 -- #############################
@@ -1828,7 +1822,7 @@ local function ItemTooltipSigilHelper(wndParent, tItemInfo, itemSource)
 					for idxProperty, tCurProperty in pairs(tCur.arProperties) do
 						if tCurProperty.nValue and tCurProperty.nValue > 0 then
 							local prop = Item.GetPropertyName(tCurProperty.eProperty)
-							tRuneStats[prop] = tRuneStats[prop] or 0
+							tRuneStats[prop] = tRuneStats[prop] or 0 --TaviTooltip: Add up rune values manually, no idea if there's a better way to call this information
 							tRuneStats[prop] = tRuneStats[prop] + tCurProperty.nValue
 							wnd:FindChild("ItemTooltip_RuneText"):SetText(String_GetWeaselString(Apollo.GetString("Tooltips_RuneAttributeBonus"), strRound(tCurProperty.nValue), Item.GetPropertyName(tCurProperty.eProperty)))
 						end
@@ -1857,34 +1851,6 @@ end
 -- #############################
 
 local function ItemTooltipRuneHelper(wndParent, tItemInfo)
-	-- IMPORTANT: If mousing over a rune item, not drawing runes on an item
-	-- Note: The raw stats (e.g. + A lot of Brutality) exists on flavor text for now
-	--[[
-
-	if tItemInfo.tRuneInfo and tItemInfo.tRuneInfo.tSet then
-		ItemTooltipSeparatorSmallLineHelper(wndParent)
-
-		local tSetData = tItemInfo.tRuneInfo.tSet
-		local wnd = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "SimpleRowSmallML", wndParent)
-		local strRuneSetText = String_GetWeaselString(Apollo.GetString("EngravingStation_RuneSetText"), tSetData.strName, tSetData.nCurrentPower, tSetData.nMaxPower)
-		wnd:SetAML(string.format("<T Font=\"CRB_InterfaceSmall\" TextColor=\"%s\">%s</T>", kUIGreen, strRuneSetText))
-		wnd:SetHeightToContentHeight()
-
-		-- Now loop through the sets
-		local tBonuses = tSetData.arBonsues
-		table.sort(tBonuses, function(a,b) return a.nRequiredPower < b.nRequiredPower end)
-
-		for idx, tCur in pairs(tBonuses) do
-			local strColor = tCur.bActive and kUIGreen or kUICyan
-			local wndBonus = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "SimpleRowSmallML", wndParent)
-			local strRuneDetails = String_GetWeaselString(Apollo.GetString("Tooltips_RuneDetails"), tCur.nRequiredPower, tCur.strName, tCur.strFlavor or "")
-			wndBonus:SetAML(string.format("<T Font=\"CRB_InterfaceSmall\" TextColor=\"%s\">%s</T>", strColor, strRuneDetails))
-			wndBonus:SetHeightToContentHeight()
-		end
-	end
-
-	]]--
-
 end
 
 -- #############################
@@ -2189,14 +2155,6 @@ local function ItemTooltipPropSortHelper(tItemInfo)
 	tSorted = tItemInfo
 	table.sort(tSorted, fnSort)
 
-	--[[
-	for idx, tCur in pairs(tSorted) do
-		if tCur.arDerived then -- Table within a table
-			table.sort(tSorted[idx].arDerived, fnSort)
-		end
-	end
-	]]--
-
 	return tSorted
 end
 
@@ -2276,23 +2234,18 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 		ItemTooltipCostumeHelper(wndItems, itemOne)
 		
 		--[[
-		tTotalStats[strProperty] = {
-			window = wndBudgetFirst,
-			value = nVal,
-			property = strProperty,
-			diff = statdiff,
-			equiped = equipedstat
-		}
+		tTotalStats[strProperty] 			the table containing our saved numbers to compare with later
+								.window		the original window that contains stat line, a new window for each line
+								.value		the value of the stat
+								.property	the stat's name
+								.diff		Carbine's combined difference
 		]]
 		
 		for prop, tpropinfo in pairs(tTotalStats) do
-			local ntotal, nrunes, ngear, nequiped, ndiff, strprop, strtotal, strrunes, strgear, strdiff, strleftbrace, strrightbrace, strplussign, strproperty, nvalue 
+			local ntotal, nrunes, ngear, nequiped, ndiff, strprop, strtotal, strrunes, strgear, strdiff, strproperty, nvalue 
 			
 			strproperty = tpropinfo.property
 			nvalue = tpropinfo.value
-			--ndiff = tpropinfo.diff
-			
-			
 			
 			if nvalue then
 				ntotal = strRound(nvalue)
@@ -2300,55 +2253,42 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 				ntotal = 0
 			end
 			
+			--Our saved count from the sigil helper function
 			if tRuneStats[strproperty] then
 				nrunes = strRound(tRuneStats[strproperty])
 			else
 				nrunes = 0
 			end
 			
-			ngear = ntotal - nrunes
+			ngear = ntotal - nrunes --find the base stats on the gear, no idea if there's a better way to do this
 			strgear = ""
 			strrunes = ""
 			strdiff = ""
-			strleftbrace = ""
-			strrightbrace = ""
-			strplussign = ""
-			strequalsign = ""
 			
-		--	if bPropHelper then
-				ndiff = TaviTooltips:GearCompareHelper(strproperty, ngear)
-				if ndiff then
-					if ndiff > 10 then
-						strdiff = string.format("<T TextColor=\"%s\">(+%s) </T>", kUIGreen, ndiff)
-					elseif ndiff < -10 then
-						strdiff = string.format("<T TextColor=\"%s\">(%s) </T>", kUIRed, ndiff)
-					else
-						strdiff = ""
-					end
+			ndiff = TaviTooltips:GearCompareHelper(strproperty, ngear) -- Our helper function to remember the stats
+			
+			--Carbine keeps using floor instead of round, so results aren't exact, but close enough.
+			if ndiff then
+				if tSettings.MergeRunes then ndiff = tpropinfo.diff end
+				if ndiff > 10 then
+					strdiff = string.format("<T TextColor=\"%s\">(+%s) </T>", kUIGreen, ndiff)
+				elseif ndiff < -10 then
+					strdiff = string.format("<T TextColor=\"%s\">(%s) </T>", kUIRed, ndiff)
+				else
+					strdiff = ""
 				end
-			--end
-			--elseif not bPropHelper then
-				--TaviTooltips.SavedStats[strproperty] = {value = ngear, difference = ""}
-				--TaviTooltips.SavedStats[strproperty].difference = strdiff
-				--strdiff = " "
-			--end
+			end
 			
-
-				--strdiff = TaviTooltips.SavedStats[strproperty].difference
-			
+			--Formatting for setAML
 			strprop = string.format("<T TextColor=\"%s\">%s: </T>", kUIBody, strproperty)
-			strtotal = string.format("<T TextColor=\"%s\">%s</T>", "White", ntotal)
-			--if nrunes > 0 or ngear > 0 then
-				strleftbrace = leftbrace
-				strrightbrace = rightbrace
-				strplussign = plussign
-				strequalsign = equalsign
-				strgear = string.format("<T TextColor=\"%s\">%s</T>", kUIBody, ngear)
-				strrunes = string.format("<T TextColor=\"%s\">%s</T>", "cyan", nrunes)
-			--end
+			strtotal = string.format("<T TextColor=\"%s\">%s</T>", tSettings.TotalColor, ntotal)
+			strgear = string.format("<T TextColor=\"%s\">%s</T>", tSettings.GearColor, ngear)
+			strrunes = string.format("<T TextColor=\"%s\">%s</T>", tSettings.RuneColor, nrunes)
 
 			local strLineLeft = tostring("<P Align=\"Left\" Font=\"CRB_InterfaceSmall\">"..strprop..strdiff.."</P>")
 			local strLineRight = tostring("<P Align=\"Right\" Font=\"CRB_InterfaceSmall\">"..strleftbrace..strgear..strplussign..strrunes..strrightbrace..strequalsign..strtotal.."</P>")
+			
+			--window is the original, which we modified, and overlay is the right-aligned bit
 			tpropinfo.window:SetAML(strLineLeft)
 			tpropinfo.window:SetHeightToContentHeight()
 			tpropinfo.overlay:SetAML(strLineRight)
@@ -2403,7 +2343,9 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 			if tItemInfo.tCompare.arBudgetBasedProperties then
 				tCompareBudgetBasedSort = ItemTooltipPropSortHelper(tItemInfo.tCompare.arBudgetBasedProperties)
 			end
-			TaviTooltips:ClearSave()
+			
+			TaviTooltips:ClearSave() --Reset so we don't accidently use old data from other items
+			
 			CallAllHelpers(wndTooltipComp, wndItemsCompare, tItemInfo.tCompare, tFlags.itemCompare, tFlags, tCompareInnateSort, tCompareBudgetBasedSort, false)
 		end
 		
@@ -2414,6 +2356,7 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 			if tItemInfo.tPrimary.arBudgetBasedProperties then
 				tPrimaryBudgetBasedSort = ItemTooltipPropSortHelper(tItemInfo.tPrimary.arBudgetBasedProperties)
 			end
+			
 			CallAllHelpers(wndTooltip, wndItems, tItemInfo.tPrimary, itemSource, tFlags, tPrimaryInnateSort, tPrimaryBudgetBasedSort, true)
 
 			if tFlags.strAppend then
@@ -2907,5 +2850,23 @@ function TaviTooltips:OnMouseOverUnitChanged(unit)
 end
 
 
+---------------------------------------------------------------------------------------------------
+-- SettingsForm Functions
+---------------------------------------------------------------------------------------------------
+
 local ToolTipInstance = TaviTooltips:new()
 ToolTipInstance:Init()
+
+
+
+function TaviTooltips:OnCloseWindow( wndHandler, wndControl, eMouseButton )
+	self.wndSettings:Show(false)
+end
+
+
+function TaviTooltips:OnDefaults( wndHandler, wndControl, eMouseButton )
+	tSettings = tDefaultSettings
+	bisDefaulting = true
+	self:OnSlashCommand()
+end
+
