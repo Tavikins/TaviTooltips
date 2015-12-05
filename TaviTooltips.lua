@@ -12,6 +12,7 @@ require "Unit"
 require "Item"
 
 local TaviTooltips = {}
+local Character = Apollo.GetAddon("Character")
 local knDataWindowPadding = 5
 local kItemTooltipWindowWidth = 350
 local kstrTab = "    "
@@ -23,6 +24,7 @@ local kUIYellow = kUIBody
 local kUICyan = "UI_TextHoloBodyCyan"
 local kUILowDurability = "yellow"
 local kUIHugeFontSize = "CRB_HeaderSmall"
+local knAttributeContainerPadding = 11
 
 local karSimpleDispositionUnitTypes =
 {
@@ -50,6 +52,16 @@ local karNPCDispositionUnitTypes =
 	["Scanner"]				= true,
 	["StructuredPlug"]		= true,
 	["Lockbox"]				= true,
+}
+
+local kPropertyLables =
+{
+	["Strikethrough Rating"]		= "Strikethrough",
+	["Critical Hit Rating"]			= "Critical Hit Chance",
+	["Critical Hit Severity Rating"]= "Critical Hit Severity",
+	["Multi-Hit Rating"]			= "Multi-Hit Chance",
+	["Multi-Hit Severity Rating"]	= "Multi-Hit Severity",
+	["Vigor Rating"]				= "Vigor"
 }
 
 local karClassToString =
@@ -294,6 +306,24 @@ local ktRiskToIcon = {
 	[Unit.CreatureRisk.Major] = {strWnd = "CreatureRisk_High"},
 }
 
+local tConversion =
+{
+	["Strikethrough"] 			= 0.003,
+	["Critical Hit Chance"]		= 0.0025,
+	["Critical Hit Severity"]	= 0.01,
+	["Multi-Hit Chance"]		= 0.006,
+	["Multi-Hit Severity"]		= 0.004,
+	["Vigor"]					= 0.0028
+}
+
+local tStats =
+{
+	Runes = {},
+	Gear = {},
+	Buffs = {},
+	Budget = {},
+}
+
 local strleftbrace		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "[")			
 local strrightbrace		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "]")
 local strplussign		= string.format("<T TextColor=\"%s\">%s</T>", kUIBody, "+")
@@ -356,8 +386,37 @@ function TaviTooltips:OnSave(eLevel)
 end
 
 function TaviTooltips:OnLoad()
+	self.CharXml = XmlDoc.CreateFromFile("TooltipsCharacter.xml")
+	self.CharXml:RegisterCallback("OnCharDocReady", self)
     self.xmlDoc = XmlDoc.CreateFromFile("TooltipsForms.xml")
     self.xmlDoc:RegisterCallback("OnDocumentReady", self)
+end
+
+function TaviTooltips:OnCharDocReady()
+	if self.CharXml == nil then return end
+	
+	self.wndCharacter 				= Apollo.LoadForm(self.CharXml, "CharacterWindow", nil, self)
+	self.wndCostume 				= self.wndCharacter:FindChild("CharFrame_BGArt:Costume")
+
+	self.wndCharacterEverything		= self.wndCharacter:FindChild("CharacterEverything")
+	self.wndCharacterStats			= self.wndCharacterEverything:FindChild("CharacterStats")
+	self.wndCharacterBonus			= self.wndCharacterEverything:FindChild("CharacterBonus")
+	self.wndCharacterTitles			= self.wndCharacter:FindChild("CharacterInformation")
+	self.wndCharacterCostumes		= self.wndCharacterEverything:FindChild("CharacterCostumes")
+	self.wndCostumeSelectionList 	= self.wndCharacterEverything:FindChild("CharacterCostumes:CostumeBtnHolder")
+	self.wndCostumeList				= self.wndCostumeSelectionList:FindChild("CostumeList")
+	self.wndCostumeListBlocker		= self.wndCostumeSelectionList:FindChild("CostumeListBlocker")
+	self.wndEntitlements			= self.wndCharacter:FindChild("Entitlements")
+	self.wndGridContainer 			= self.wndEntitlements:FindChild("GridContainer")
+	self.wndCharacterReputation		= self.wndCharacterEverything:FindChild("CharacterReputation")
+	self.wndDropdownContents		= self.wndCharacterEverything:FindChild("DropdownContents")
+
+	self.wndCharacter:FindChild("DropdownBtn"):AttachWindow(self.wndDropdownContents)
+	self.wndCharacter:FindChild("TitleSelectionBtn"):AttachWindow(self.wndCharacter:FindChild("NameEditTitleContainer"))
+	self.wndCharacter:FindChild("ClassTitleGuild"):AttachWindow(self.wndCharacter:FindChild("NameEditGuildTagContainer"))
+	self.wndCharacter:FindChild("CharacterTitleDropdown"):AttachWindow(self.wndCharacter:FindChild("CharacterTitleContainer"))
+
+	self.wndCharacter:Show(false)
 end
 
 function TaviTooltips:OnOptionChanged( wndHandler, wndControl, strText )
@@ -415,9 +474,12 @@ function TaviTooltips:OnDocumentReady()
 	Apollo.RegisterEventHandler("MatchEntered", "OnUpdateVitals", self)
 	--Apollo.RegisterEventHandler("MouseOverUnitChanged", "OnMouseOverUnitChanged", self)
 	Apollo.RegisterEventHandler("PlayerRealmName", "OnPlayerRealmName", self)
+	
 	Apollo.RegisterSlashCommand("tavitooltips", "OnSlashCommand", self)
 	Apollo.RegisterSlashCommand("TaviTooltips", "OnSlashCommand", self)
 	Apollo.RegisterSlashCommand("ttt", "OnSlashCommand", self)
+	
+
 	
 	self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
 
@@ -433,7 +495,7 @@ function TaviTooltips:OnDocumentReady()
 	self.timerGeneral:Stop()
 
 	self:CreateCallNames()
-
+	TaviTooltipsHook:OnHooksReady()
 	self.wndContainer = Apollo.LoadForm("TooltipsForms.xml", "WorldTooltipContainer", nil, self)
 	GameLib.SetWorldTooltipContainer(self.wndContainer)
 end
@@ -442,8 +504,11 @@ end
 --GeminiHook things ... I don't know if half of this was even necessary, but at least it's not replacing Carbine's ToolTips, so compatability should be okay for dependancies
 
 TaviTooltipsHook = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("TaviTooltipsHook", false, {}, "Gemini:Hook-1.0")
+local bHooked = false
 
-function TaviTooltipsHook:OnEnable()
+function TaviTooltipsHook:OnHooksReady()
+	if bHooked then return end
+	bHooked = true
   --self:RawHook(Apollo.GetAddon("ToolTips"),"OnGenerateWorldObjectTooltip")
   self:RawHook(Apollo.GetAddon("ToolTips"),"OnMouseOverUnitChanged")
   self:RawHook(Apollo.GetAddon("ToolTips"),"CreateCallNames")
@@ -452,7 +517,535 @@ function TaviTooltipsHook:OnEnable()
   self:RawHook(Apollo.GetAddon("ToolTips"),"AddTimedWindow")
   self:RawHook(Apollo.GetAddon("ToolTips"),"OnTimer")
   self:RawHook(Apollo.GetAddon("ToolTips"),"OnPlayerRealmName")
+  self:RawHook(Apollo.GetAddon("Character"),"OnPersonaUpdateCharacterStats")
+  self:RawHook(Apollo.GetAddon("Character"),"OnToggleCharacterWindow")
+--  self:RawHook(Apollo.GetAddon("Character"),"StatsDrawHelper")
+--  self:RawHook(Apollo.GetAddon("Character"),"DrawAttributes")
 end
+tOffsets = {}
+function TaviTooltips:StatsDrawHelper(wndContainer, strName, strValue, strIcon, crTextColor, eState, strTooltip, strBreakdown)
+	local nIndex = wndContainer:GetData()
+	local wndItem = wndContainer:FindChild("AttributeItem"..nIndex)
+	if wndItem == nil then
+		wndItem = Apollo.LoadForm("Character.xml", "AttributeItem", wndContainer, Character)
+		wndItem:SetName("AttributeItem"..nIndex)
+		local l,t,r,b = wndItem:GetAnchorOffsets()
+		tOffsets[wndItem:GetName()] = {l,t,r,b}
+	end
+	wndItem:FindChild("StatLabel"):SetAML(string.format("<T Font=\"CRB_InterfaceSmall\" TextColor=\"%s\">%s</T>", crTextColor, strName))
+	local crTextValueColor = "UI_TextHoloBodyCyan"
+	if eState then
+		if eState == Unit.CodeEnumDiminishingReturnState.SoftCap then
+			crTextValueColor = "UI_WindowYellow"
+		elseif eState == Unit.CodeEnumDiminishingReturnState.HardCap then
+			crTextValueColor = "UI_WindowTextRed"
+		end
+	end
+	wndItem:FindChild("StatValue"):SetAML(strBreakdown..string.format("<T Font=\"CRB_Header9\" TextColor=\"%s\"> %s</T></P>", crTextValueColor, strValue))
+	wndItem:SetTooltip(strTooltip)
+	local bBackgroundColor = nIndex % 2 == 1
+	if bBackgroundColor then
+		local wndBackground = wndItem:FindChild("Background")
+		wndBackground:Show(true)
+	end
+	
+	local wndParent = wndContainer:GetParent()
+	local wndAttributeExpanderBtn = wndParent:FindChild("AttributeExpanderBtn")
+	Character:OnToggleAttribute(wndAttributeExpanderBtn, wndAttributeExpanderBtn)
+	wndItem:FindChild("StatValue"):SetAnchorOffsets(-260,4,-5,5)
+	--wndItem:FindChild("StatValue"):SetAnchorOffsets(tOffsets[wndItem:GetName()][1],tOffsets[wndItem:GetName()][2],tOffsets[wndItem:GetName()][3],tOffsets[wndItem:GetName()][4])
+end
+
+
+function TaviTooltipsHook:OnEnable()
+	TaviTooltipsHook:OnHooksReady()
+end
+
+function TaviTooltipsHook:OnToggleCharacterWindow()
+	if not Character.wndCharacter:IsVisible() then
+		TaviTooltips:ShowCharacterWindow()
+	else
+		Character.wndCharacter:Close()
+		Event_FireGenericEvent("CharacterWindowHasBeenClosed")
+		Sound.Play(Sound.PlayUI01ClosePhysical)
+	end
+end
+
+function TaviTooltipsHook:OnPersonaUpdateCharacterStats()
+	if Character.wndCharacter:IsShown() then
+		TaviTooltips:DrawAttributes(Character.wndCharacter)
+	end
+end
+
+function TaviTooltipsHook:ShowCharacterWindow()
+	TaviTooltips:ShowCharacterWindow()
+end
+
+function TaviTooltips:ShowCharacterWindow()
+	local unitPlayer = GameLib.GetPlayerUnit()
+	Character.wndCharacter:SetData(unitPlayer)
+	
+	Character.wndCharacter:Invoke()
+	Character:MapEquipment()
+	Character:OnDrawEditNamePopout()
+
+	Character.wndCharacter:FindChild("DropdownBtn"):SetText(String_GetWeaselString(Apollo.GetString("Character_Display"), Apollo.GetString("Character_Stats")))
+	Character.wndCharacterEverything:Show(true)
+	Character.wndCharacterStats:Show(true)
+	Character.wndCharacterCostumes:Show(false)
+	Character.wndCharacterBonus:Show(false)
+	Character.wndCharacterReputation:Show(false)
+	Character.wndEntitlements:Show(false)
+	Character.wndCharacter:ToFront()
+	TaviTooltips:DrawAttributes(Character.wndCharacter)
+	Character:DrawNames(Character.wndCharacter)
+
+	Character.wndCostume:SetCostume(unitPlayer)
+	Character.wndCostume:SetSheathed(Character.wndCharacter:FindChild("SetSheatheBtn"):IsChecked())
+
+	Event_FireGenericEvent("CharacterWindowHasBeenToggled")
+	Sound.Play(Sound.PlayUI68OpenPanelFromKeystrokeVirtual)
+	Event_ShowTutorial(GameLib.CodeEnumTutorial.CharacterPanel)
+
+end
+
+function TaviTooltips:DrawAttributes(wndUpdate)
+	tStats.Runes = {}
+	tStats.Gear = {}
+	tStats.Buffs = {}
+	tStats.Budget = {}
+	
+	local unitPlayer = wndUpdate and wndUpdate:GetData() or nil
+
+	if unitPlayer == nil or not wndUpdate:IsShown() then
+		return
+	end
+
+	local arCategories =
+	{
+		{
+			strTitle		= Apollo.GetString("Character_Offensive"),
+			arAttributes	=
+			{
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseAvoidReduceChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetStrikethroughChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetStrikethroughChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_StrikethroughTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_AvoidReduce).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetStrikethroughChance().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidReduceChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidReduceChance).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseCritChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetCritChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetCritChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_CritTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_CritChanceIncrease).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetCritChance().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseCritChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseCritChance).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.CriticalHitSeverityMultiplier),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetCritSeverity().nAmount, 2, true)),
+					eState		= unitPlayer:GetCritSeverity().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_CritSevTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingCritSeverityIncrease).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetCritSeverity().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.CriticalHitSeverityMultiplier).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.CriticalHitSeverityMultiplier).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseMultiHitChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetMultiHitChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetMultiHitChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_MultiHitChanceTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingMultiHitChance).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetMultiHitChance().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseMultiHitChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseMultiHitChance).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseMultiHitAmount),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetMultiHitAmount().nAmount, 2, true)),
+					eState		= unitPlayer:GetMultiHitAmount().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_MultiHitSeverityTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingMultiHitAmount).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetMultiHitAmount().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseMultiHitAmount).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseMultiHitAmount).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseVigor),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetVigor().nAmount, 2, true)),
+					eState		= unitPlayer:GetVigor().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_VigorTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingVigor).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetVigor().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseVigor).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseVigor).fValue * 100, 2, true))
+				},
+				
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.IgnoreArmorBase),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetArmorPierce().nAmount, 2, true)),
+					eState		= unitPlayer:GetArmorPierce().eDRState,
+					strTooltip 	=  String_GetWeaselString(Apollo.GetString("Character_ArmorPenTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingArmorPierce).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetArmorPierce().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.IgnoreArmorBase).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.IgnoreArmorBase).fValue * 100, 2, true))
+				},
+				
+			},
+		},
+		{
+			strTitle		= Apollo.GetString("Character_Defensive"),
+			arAttributes 	=
+			{
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.DamageMitigationPctOffsetPhysical),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetPhysicalMitigation().nAmount, 2, true)),
+					eState		= unitPlayer:GetPhysicalMitigation().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_PhysMitTooltip"), Apollo.FormatNumber(unitPlayer:GetPhysicalMitigationRating() + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Armor).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetPhysicalMitigation().nAmount - ((unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffsetPhysical).fValue + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffset).fValue) * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.ResistPhysical).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Armor).fValue, 2, true), Apollo.FormatNumber((unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffsetPhysical).fValue + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffset).fValue) * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.DamageMitigationPctOffsetTech),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetTechMitigation().nAmount, 2, true)),
+					eState		= unitPlayer:GetTechMitigation().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_TechMitTooltip"), Apollo.FormatNumber(unitPlayer:GetTechMitigationRating() + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Armor).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetTechMitigation().nAmount - ((unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffsetTech).fValue + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffset).fValue) * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.ResistTech).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Armor).fValue, 2, true), Apollo.FormatNumber((unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffsetTech).fValue + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffset).fValue) * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.DamageMitigationPctOffsetMagic),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetMagicMitigation().nAmount, 2, true)),
+					eState		= unitPlayer:GetMagicMitigation().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_MagicMitTooltip"), Apollo.FormatNumber(unitPlayer:GetMagicMitigationRating() + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Armor).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetMagicMitigation().nAmount - ((unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffsetMagic).fValue + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffset).fValue) * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.ResistMagic).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Armor).fValue, 2, true), Apollo.FormatNumber((unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffsetMagic).fValue + unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.DamageMitigationPctOffset).fValue) * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseGlanceAmount),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetGlanceAmount().nAmount, 2, true)),
+					eState		= unitPlayer:GetGlanceAmount().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_GlanceSeverityTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingGlanceAmount).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetGlanceAmount().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseGlanceAmount).fValue  * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseGlanceAmount).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseGlanceChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetGlanceChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetGlanceChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_GlanceChanceTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingGlanceChance).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetGlanceChance().nAmount -(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseGlanceChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseGlanceChance).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseCriticalMitigation),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetCriticalMitigation().nAmount, 2, true)),
+					eState		= unitPlayer:GetCriticalMitigation().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_CritMitigationTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingCriticalMitigation).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetCriticalMitigation().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseCriticalMitigation).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseCriticalMitigation).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseAvoidChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetDeflectChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetDeflectChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_DeflectTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_AvoidIncrease).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetDeflectChance().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidChance).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseAvoidCritChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetDeflectCritChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetDeflectCritChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_CritDeflectTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_CritChanceDecrease).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetDeflectCritChance().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidCritChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidCritChance).fValue * 100, 2, true))
+				},
+			},
+		},
+		{
+			strTitle		= Apollo.GetString("Character_Life"),
+			arAttributes 	=
+			{
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.ShieldMitigationMax),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetShieldMitigationPct(), 2, true)),
+					strTooltip 	= Apollo.GetString("Character_ShieldMitigation_Tooltip")      
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.ShieldRegenPct),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetShieldRegenPct(), 2, true)),
+					strTooltip 	= Apollo.GetString("Character_ShieldRegenPercentTooltip")
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.ShieldRebootTime),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_SecondsLabel"), Apollo.FormatNumber(unitPlayer:GetShieldRebootTime(), 2, true)),
+					strTooltip 	= Apollo.GetString("Character_ShieldRebootTooltip")
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.ShieldTickTime),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_SecondsLabel"), Apollo.FormatNumber(unitPlayer:GetShieldTickTime(), 2, true)),
+					strTooltip 	= Apollo.GetString("Character_ShieldTickTime_Tooltip")      
+				}
+			},
+		},
+		{
+			strTitle		= Apollo.GetString("Character_Utility"),
+			arAttributes 	=
+			{
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.CooldownReductionModifier),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetCooldownReductionModifier(), 2, true)),
+					strTooltip 	= Apollo.GetString("Character_HasteTooltip")
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.CCDurationModifier),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetCCDurationModifier().nAmount, 2, true)),
+					eState		= unitPlayer:GetCCDurationModifier().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_CCDurationTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingCCResilience).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetCCDurationModifier().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.CCDurationModifier).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.CCDurationModifier).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseLifesteal),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetLifesteal().nAmount, 2, true)),
+					eState		= unitPlayer:GetLifesteal().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_LifestealTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingLifesteal).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetLifesteal().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseLifesteal).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseLifesteal).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseFocusPool),
+					strValue 	= Apollo.FormatNumber(unitPlayer:GetMaxFocus(), 0, true),
+					strTooltip 	= Apollo.GetString("Character_FocusPool")
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseFocusRecoveryInCombat),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetFocusRegenInCombat().nAmount, 2, true)),
+					eState		= unitPlayer:GetFocusRegenInCombat().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_ManaRecoveryTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingFocusRecovery).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetFocusRegenInCombat().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseFocusRecoveryInCombat).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseFocusRecoveryInCombat).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.FocusCostModifier),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.FocusCostModifier).fValue * 100, 2, true)),
+					strTooltip 	= Apollo.GetString("Character_ManaCostRedTooltip")
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseDamageReflectChance),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetDamageReflectChance().nAmount, 2, true)),
+					eState		= unitPlayer:GetDamageReflectChance().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_ReflectChanceTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingDamageReflectChance).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetDamageReflectChance().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseDamageReflectChance).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseDamageReflectChance).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseDamageReflectAmount),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetDamageReflectAmount().nAmount, 2, true)),
+					eState		= unitPlayer:GetDamageReflectAmount().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_ReflectSeverityTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingDamageReflectAmount).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetDamageReflectAmount().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseDamageReflectAmount).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseDamageReflectAmount).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.BaseIntensity),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetIntensity().nAmount, 2, true)),
+					eState		= unitPlayer:GetIntensity().eDRState,
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_IntensityTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingIntensity).fValue, 2, true), Apollo.FormatNumber(unitPlayer:GetIntensity().nAmount - (unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseIntensity).fValue * 100), 2, true), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseIntensity).fValue * 100, 2, true))
+				},
+			},
+		},
+		{
+			
+			strTitle		= Apollo.GetString("Character_PvP"),
+			arAttributes 	= 
+			{
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.PvPOffensePctOffset),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetPvPDamageI(), 2, true)),
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_PvPOffenseTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPOffensiveRating).fValue, 2, true),
+								  Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPOffensePctOffset).fValue * 100, 2, true), Apollo.FormatNumber(unitPlayer:GetPvPDamageO(), 2, true), Apollo.FormatNumber(unitPlayer:GetPvPDamageI() - unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPOffensePctOffset).fValue * 100, 2, true))
+				},
+				{	-- GOTCHA: Healing actually uses PvPOffenseRating, which is called PvP Power to the player
+					strName 	= Apollo.GetString("Character_PvPHealLabel"),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetPvPHealingI(), 2, true)),
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_PvPHealingTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPOffensiveRating).fValue, 2, true),
+								  Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPOffensePctOffset).fValue * 100, 2, true), Apollo.FormatNumber(unitPlayer:GetPvPHealingO(), 2, true), Apollo.FormatNumber(unitPlayer:GetPvPHealingI() - unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPOffensePctOffset).fValue * 100, 2, true))
+				},
+				{
+					strName 	= Item.GetPropertyName(Unit.CodeEnumProperties.PvPDefensePctOffset),
+					strValue 	= String_GetWeaselString(Apollo.GetString("Character_PercentAppendLabel"), Apollo.FormatNumber(unitPlayer:GetPvPDefenseI(), 2, true)),
+					strTooltip 	= String_GetWeaselString(Apollo.GetString("Character_PvPDefenseTooltip"), Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPDefensiveRating).fValue, 2, true),
+								  Apollo.FormatNumber(unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPDefensePctOffset).fValue * 100, 2, true), Apollo.FormatNumber(unitPlayer:GetPvPDefenseO(), 2, true), Apollo.FormatNumber(unitPlayer:GetPvPDefenseI() - unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.PvPDefensePctOffset).fValue * 100, 2, true))
+				}
+			},
+		}
+	}
+	
+	TaviTooltips:GetStatSum()
+	
+	local wndParent = wndUpdate:FindChild("CharacterStats")
+	for idx, tCur in pairs (arCategories) do
+		local wndItemContainer = wndParent:FindChild("AttributeContainer"..idx)
+		local wndItemHolder = nil
+		if wndItemContainer == nil then
+			wndItemContainer = Apollo.LoadForm(Character.xmlDoc, "AttributeContainer", wndParent, Character)
+			wndItemContainer:SetName("AttributeContainer"..idx)
+			wndItemHolder = Apollo.LoadForm(Character.xmlDoc, "AttributeContHolder", wndItemContainer , Character)
+		else
+			wndItemHolder = wndItemContainer:FindChild("AttributeContHolder")
+		end
+		local wndAttributeExpanderBtn = wndItemContainer:FindChild("AttributeExpanderBtn")
+		local nContainerLeft, nContainerTop, nContainerRight, nContainerBottom = wndItemHolder:GetOriginalLocation():GetOffsets()
+		local nExpandBtnHeight = wndAttributeExpanderBtn:GetHeight()
+		wndAttributeExpanderBtn:SetCheck(true)
+
+		wndAttributeExpanderBtn:SetText(tCur.strTitle)
+		local strFormattedValues
+		local strIcon = ""
+		for idxInner, tCurInner in pairs (tCur.arAttributes) do
+			wndItemHolder:SetData(idxInner)
+			if tStats.Gear[tCurInner.strName] ~= nil and tStats.Runes[tCurInner.strName] ~= nil and tStats.Buffs[tCurInner.strName] ~= nil and tStats.Base[tCurInner.strName] ~= nil then
+				strFormattedValues = string.format("<P Align=\"Right\" Font=\"CRB_Header9\" TextColor=\"UI_TextHoloBody\"><T TextColor=\"xkcdBattleshipGrey\">%s%%</T>+<T TextColor=\"xkcdLightGrey\">%s%%</T>+<T TextColor=\"xkcdGreen\">%s%%</T>+<T TextColor=\"xkcdLightBlue\">%s%%</T>=",
+					strRound(tStats.Base[tCurInner.strName], 1), strRound(tStats.Gear[tCurInner.strName], 1), strRound(tStats.Runes[tCurInner.strName], 1), strRound(tStats.Buffs[tCurInner.strName], 1))
+			else 
+				strFormattedValues = "<P Align=\"Right\" Font=\"CRB_Header9\">"
+			end
+			self:StatsDrawHelper(wndItemHolder, tCurInner.strName, tCurInner.strValue, strIcon, "UI_TextHoloBody", tCurInner.eState, tCurInner.strTooltip, strFormattedValues)
+		end
+
+		local nNewBottom = wndItemHolder:ArrangeChildrenVert()
+		wndItemHolder:SetAnchorOffsets(nContainerLeft, nContainerTop + nExpandBtnHeight, nContainerRight, nNewBottom + nExpandBtnHeight )
+		wndItemContainer:SetAnchorOffsets(nContainerLeft, nContainerTop, nContainerRight, nNewBottom + knAttributeContainerPadding + nExpandBtnHeight)
+	end
+	wndParent:ArrangeChildrenVert()
+	
+	---------- Durability ------------
+	for iSlot, wndSlot in pairs(Character.arSlotsWindowsByName) do
+		wndSlot:FindChild("DurabilityMeter"):SetProgress(0)
+		wndSlot:FindChild("DurabilityBlocker"):Show(false)
+		if wndSlot:FindChild("DurabilityAlert") then
+			wndSlot:FindChild("DurabilityAlert"):Show(false)
+		end
+	end
+
+	if unitPlayer ~= nil then
+		local tItems = unitPlayer:GetEquippedItems()
+		if unitPlayer ~= GameLib.GetPlayerUnit() then
+			tItems = Character.arInspectItems
+		end
+
+		local wndVisibleSlots = wndUpdate:FindChild("VisibleSlots")
+
+		for idx, itemCurr in ipairs(tItems) do
+			local wndSlot = nil
+			for iSlot, wndValue in pairs(Character.arSlotsWindowsByName) do
+				if itemCurr:GetSlotName() == iSlot then
+					wndSlot = wndValue
+				end
+			end
+
+			if wndSlot ~= nil then
+				local wndDurabilityBlocker = wndSlot:FindChild("DurabilityBlocker")
+				if wndDurabilityBlocker ~= nil then
+					local wndDurabilityMeter = wndSlot:FindChild("DurabilityMeter")
+					local nDurabilityMax = itemCurr:GetMaxDurability()
+					local nDurabilityCurrent = itemCurr:GetDurability()
+					local nDurabilityRation = (nDurabilityCurrent / nDurabilityMax)
+					local bHasDurability = nDurabilityMax > 0
+	
+					local bShowDurabilityBlocker = not bHasDurability
+					wndDurabilityMeter:Show(bHasDurability)
+					wndDurabilityMeter:SetMax(nDurabilityMax)
+					wndDurabilityMeter:SetProgress(nDurabilityCurrent)
+					if itemCurr:GetItemFamily() == Item.CodeEnumItem2Family.Costume then
+						bShowDurabilityBlocker = false
+					else
+						if nDurabilityRation <= .100 then
+							wndDurabilityMeter:SetBarColor("ffaf1212")
+							local wndDurabilityAlert = wndSlot:FindChild("DurabilityAlert")
+							if wndDurabilityAlert then
+								wndDurabilityAlert:Show(true)
+							end
+						elseif nDurabilityRation <= .250 then
+							wndDurabilityMeter:SetBarColor("ffffba00")
+						elseif nDurabilityRation <= .500 then
+							wndDurabilityMeter:SetBarColor("ffd7d017")
+						else 
+							wndDurabilityMeter:SetBarColor("ff129faf")
+						end
+					end
+					wndDurabilityBlocker:Show(bShowDurabilityBlocker)
+				end
+			end
+		end
+		
+		local wndPermAttFrame = wndUpdate:FindChild("PermAttributeFrame")
+		wndPermAttFrame:SetData(unitPlayer)
+		Character:UpdateAttributes(wndPermAttFrame)
+	end
+end
+
+
+
+function TaviTooltips:GetStatSum()
+	local unitPlayer = GameLib.GetPlayerUnit()
+	if unitPlayer == nil then return end
+	
+	tStats.Runes = {}
+	tStats.Gear = {}
+	tStats.Buffs = {}
+	tStats.Budget = {}
+	tStats.Base = {
+		["Strikethrough"]			= unitPlayer:GetStrikethroughChance().nAmount,
+		["Critical Hit Chance"]		= unitPlayer:GetCritChance().nAmount,
+		["Critical Hit Severity"]	= unitPlayer:GetCritSeverity().nAmount,
+		["Multi-Hit Chance"]		= unitPlayer:GetMultiHitChance().nAmount,
+		["Multi-Hit Severity"]		= unitPlayer:GetMultiHitAmount().nAmount,
+		["Vigor"]					= unitPlayer:GetVigor().nAmount
+	}
+	tStats.Total = { 
+		["Strikethrough"]			= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_AvoidReduce).fValue,
+		["Critical Hit Chance"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_CritChanceIncrease).fValue,
+		["Critical Hit Severity"]	= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingCritSeverityIncrease).fValue,
+		["Multi-Hit Chance"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingMultiHitChance).fValue,
+		["Multi-Hit Severity"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingMultiHitAmount).fValue,
+		["Vigor"]					= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingVigor).fValue
+	}
+	
+	
+	local arGear = GameLib.GetPlayerUnit():GetEquippedItems()
+	for ig = 1, #arGear do
+	
+		--Stats from budget (gear+runes)
+		local tinfo = arGear[ig]:GetDetailedInfo()
+		local arBudget = tinfo.tPrimary.arBudgetBasedProperties
+		if arBudget ~= nil then
+			for ib = 1, #arBudget do
+				if arBudget[ib].nValue ~= nil then
+				--Print(arBudget[ib].strName)
+				local propertyName = self:GetPropertyName(arBudget[ib].strName)
+				--Print(propertyName)
+					if tStats.Budget[propertyName] == 0 or tStats.Budget[propertyName] == nil then
+						tStats.Budget[propertyName] = arBudget[ib].nValue
+					elseif tStats.Budget[propertyName] > 0 then
+						tStats.Budget[propertyName] = tStats.Budget[propertyName] + arBudget[ib].nValue
+					end
+				end
+			end
+		end
+		
+		--Stats from just runes
+		local tRunes = tinfo.tPrimary.tRunes
+		if tRunes ~= nil then
+			local arRunes = tRunes.arRuneSlots
+			if arRunes ~= nil then
+				for ir = 1, #arRunes do
+					if arRunes[ir].arProperties[1].nValue ~= nil then
+					--Print(arRunes[ir].arProperties[1].strName)
+					local propertyName = self:GetPropertyName(arRunes[ir].arProperties[1].strName)
+					--Print(propertyName)
+						if tStats.Runes[propertyName] == 0 or tStats.Runes[propertyName] == nil then
+							tStats.Runes[propertyName] = arRunes[ir].arProperties[1].nValue
+						elseif tStats.Runes[propertyName] > 0 then
+							tStats.Runes[propertyName] = tStats.Runes[propertyName] + arRunes[ir].arProperties[1].nValue
+						end
+					end
+				end
+			end
+		end
+	end
+	
+	for stat, value in pairs(tStats.Total) do
+		if tStats.Runes[stat] == nil then tStats.Runes[stat] = 0 end
+		if tStats.Gear[stat] == nil then tStats.Gear[stat] = 0 end
+		if tStats.Budget[stat] == nil then tStats.Budget[stat] = 0 end
+		
+		tStats.Gear[stat] = tStats.Budget[stat] - tStats.Runes[stat]
+		tStats.Buffs[stat] = tStats.Total[stat] - tStats.Budget[stat]
+		
+		local GearPercent = tStats.Gear[stat] * tConversion[stat]
+		local BuffsPercent = tStats.Buffs[stat] * tConversion[stat]
+		local RunesPercent = tStats.Runes[stat] * tConversion[stat]
+		--Print(GearPercent..","..BuffsPercent..","..RunesPercent)
+		tStats.Gear[stat] = GearPercent
+		tStats.Buffs[stat] = BuffsPercent
+		tStats.Runes[stat] = RunesPercent
+		tStats.Base[stat] = tStats.Base[stat] - GearPercent - BuffsPercent - RunesPercent
+	end
+
+	for stat, value in pairs(tStats.Total) do
+		--Print(stat.." : "..strRound(tStats.Total[stat], 1).." = "..strRound(tStats.Gear[stat], 1).." + "..strRound(tStats.Runes[stat], 1).." + "..strRound(tStats.Buffs[stat], 1))
+	end
+end
+
+function TaviTooltips:GetPropertyName(prop)
+	if prop == "Strikethrough Rating" then return "Strikethrough"
+	elseif prop == "Critical Hit Rating" then return "Critical Hit Chance"
+	elseif prop == "Critical Hit Severity Rating" then return "Critical Hit Severity"
+	elseif prop == "Multi-Hit Rating" then return "Multi-Hit Chance"
+	elseif prop == "Multi-Hit Severity Rating" then return "Multi-Hit Severity"
+	elseif prop == "Vigor Rating" then return "Vigor"
+	end
+	
+	return prop
+end
+
 
 function TaviTooltipsHook:OnGenerateWorldObjectTooltip( wndHandler, wndControl, eToolTipType, unit, strPropName )
 	--self.hooks[Apollo.GetAddon("ToolTips")].OnGenerateWorldObjectTooltip( wndHandler, wndControl, eToolTipType, unit, strPropName )
@@ -556,6 +1149,9 @@ function TaviTooltips:ClearSave()
 	self.SavedStats = {}
 end
 
+
+--########################################################################
+--########################################################################
 
 --Carbine's main tooltip mega-function
 
@@ -1122,7 +1718,7 @@ end
 -- Item Tooltip --
 ------------------
 
--- #############################
+---------------
 local tTotalStats = {}
 local tRuneStats = {}
 local function ItemTooltipHeaderHelper(wndParent, tItemInfo, itemSource, wndTooltip, tFlags)
@@ -1148,7 +1744,7 @@ local function ItemTooltipHeaderHelper(wndParent, tItemInfo, itemSource, wndTool
 	wnd:SetAnchorOffsets(nLeft, nTop, nRight, nTop + math.max(20, nHeight) + 63)
 end
 
--- #############################
+---------------
 
 local function ItemTooltipBasicStatsHelperWindowBuilder(wndParent, strColor, strString)
 	local wndCurItemBasicStats = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "ItemBasicStatsLine", wndParent)
@@ -1157,7 +1753,7 @@ local function ItemTooltipBasicStatsHelperWindowBuilder(wndParent, strColor, str
 	return wndCurItemBasicStats
 end
 
--- #############################
+---------------
 
 local function ItemTooltipBasicStatsHelper(wndParent, tItemInfo, itemSource)
 
@@ -1311,7 +1907,7 @@ local function ItemTooltipBasicStatsHelper(wndParent, tItemInfo, itemSource)
 
 end
 
--- #############################
+---------------
 
 local function ItemTooltipClassReqHelper(wndParent, tItemInfo)
 	if tItemInfo.tClassRequirement then
@@ -1334,7 +1930,7 @@ local function ItemTooltipClassReqHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipFactionReqHelper(wndParent, tItemInfo)
 	if tItemInfo.tFactionRequirement then
@@ -1347,7 +1943,7 @@ local function ItemTooltipFactionReqHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSpellReqHelper(wndParent, tItemInfo)
 	if tItemInfo.arSpells then
@@ -1362,7 +1958,7 @@ local function ItemTooltipSpellReqHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSpecialReqHelper(wndParent, tItemInfo)
 	if tItemInfo.strSpecialFailures then
@@ -1373,7 +1969,7 @@ local function ItemTooltipSpecialReqHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipAdditiveHelper(wndParent, tItemInfo)
 	-- Additive Coordinate Effects
@@ -1385,7 +1981,7 @@ local function ItemTooltipAdditiveHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSchematicHelper(wndParent, tItemInfo)
 	-- Tradeskill Schematic Details
@@ -1409,7 +2005,7 @@ local function ItemTooltipSchematicHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSeparatorDiagonalHelper(wndParent)
 	if #wndParent:GetChildren() > 1 then -- Separator is skipped if it's the very first element
@@ -1417,7 +2013,7 @@ local function ItemTooltipSeparatorDiagonalHelper(wndParent)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSeparatorSmallLineHelper(wndParent)
 	if #wndParent:GetChildren() > 1 then -- Separator is skipped if it's the very first element
@@ -1425,7 +2021,7 @@ local function ItemTooltipSeparatorSmallLineHelper(wndParent)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipInnatePropHelper(wndParent, tSortedInnatePropList, bUseDiff) -- E.G. Assault Power, Support Power, Armor, Shield
 	if tSortedInnatePropList and #tSortedInnatePropList > 0 then
@@ -1478,7 +2074,7 @@ local function ItemTooltipInnatePropHelper(wndParent, tSortedInnatePropList, bUs
 	end
 end
 
--- #############################
+---------------
 local tTotalStats = {}
 local tRuneStats = {}
 
@@ -1549,7 +2145,7 @@ local function ItemTooltipBudgetPropHelper(wndParent, tblSortedBudgetPropList, b
 
 end
 
--- #############################
+---------------
 
 local function ItemTooltipEmptySocketsHelper(wndParent, tItemInfo, itemSource)
 	local bMadeHeader = false
@@ -1581,7 +2177,7 @@ local function ItemTooltipEmptySocketsHelper(wndParent, tItemInfo, itemSource)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipChargeHelper(wndParent, tItemInfo)
 	-- Charge Count
@@ -1600,7 +2196,7 @@ local function ItemTooltipChargeHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSpellEffectHelper(wndParent, tItemInfo)
 	-- Spell Effects
@@ -1638,7 +2234,7 @@ local function ItemTooltipSpellEffectHelper(wndParent, tItemInfo)
 	
 end
 
--- #############################
+---------------
 local function ItemTooltipImbuementHelper(wndParent, tItemInfo)
 	if not tItemInfo.arImbuements then
 		return
@@ -1701,7 +2297,7 @@ local function ItemTooltipImbuementHelper(wndParent, tItemInfo)
 	
 end
 
--- #############################
+---------------
 
 local function ItemTooltipQuestHelper(wndParent, tItemInfo)
 	-- Quest
@@ -1712,7 +2308,7 @@ local function ItemTooltipQuestHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipSigilHelper(wndParent, tItemInfo, itemSource)
 	tRuneStats = {}
@@ -1848,12 +2444,12 @@ local function ItemTooltipSigilHelper(wndParent, tItemInfo, itemSource)
 	wndBox:SetAnchorOffsets(nLeft, nTop, nRight, nTop + (math.ceil(nNumChildren / 2) * nHeight))
 end
 
--- #############################
+---------------
 
 local function ItemTooltipRuneHelper(wndParent, tItemInfo)
 end
 
--- #############################
+---------------
 
 local function ItemTooltipFlavorHelper(wndParent, tItemInfo)
 	local strResult = ""
@@ -1897,7 +2493,7 @@ local function ItemTooltipFlavorHelper(wndParent, tItemInfo)
 	wnd:SetAnchorOffsets(nLeft, nTop, nRight, nTop + nTextHeight + 23)
 end
 
--- #############################
+---------------
 
 local function ItemTooltipCostumeHelper(wndParent, tItemInfo)
 	-- We only want to show the costume portion for weapon and armor tooltips.
@@ -1908,7 +2504,7 @@ local function ItemTooltipCostumeHelper(wndParent, tItemInfo)
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipMonHelper(wndParent, tItemInfo, itemSource, tFlags) -- Sell, Buy, Buy Back, Repair
 	if not tItemInfo.tCost or tFlags.bInvisibleFrame then -- bInvisibleFrame is mainly used for crafting
@@ -2122,7 +2718,7 @@ local function ItemTooltipMonHelper(wndParent, tItemInfo, itemSource, tFlags) --
 	end
 end
 
--- #############################
+---------------
 
 local function ItemTooltipAppendHelper(wndParent, strAppendText)
 	local wnd = Apollo.LoadForm("ui\\Tooltips\\TooltipsForms.xml", "ItemTooltip_Flavor", wndParent)
@@ -2134,7 +2730,7 @@ local function ItemTooltipAppendHelper(wndParent, strAppendText)
 	wnd:SetAnchorOffsets(nLeft, nTop, nRight, nTop + nTextHeight + 30)
 end
 
--- #############################
+---------------
 
 local function ItemTooltipPropSortHelper(tItemInfo)
 	local tSorted = {}
@@ -2374,6 +2970,10 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 
 	return wndTooltip, wndTooltipComp
 end
+
+--########################################################################
+--########################################################################
+
 
 -------------------
 -- Spell Tooltip --
