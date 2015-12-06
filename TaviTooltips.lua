@@ -996,7 +996,7 @@ function TaviTooltips:GetStatSum()
 			local arRunes = tRunes.arRuneSlots
 			if arRunes ~= nil then
 				for ir = 1, #arRunes do
-					if arRunes[ir].arProperties[1].nValue ~= nil then
+					if arRunes[ir].arProperties ~= nil and arRunes[ir].arProperties[1].nValue ~= nil then
 					--Print(arRunes[ir].arProperties[1].strName)
 					local propertyName = self:GetPropertyName(arRunes[ir].arProperties[1].strName)
 					--Print(propertyName)
