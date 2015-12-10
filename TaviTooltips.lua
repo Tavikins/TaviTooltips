@@ -13,6 +13,8 @@ require "Item"
 
 local TaviTooltips = {}
 local Character = Apollo.GetAddon("Character")
+local TaviTooltipsHook = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("TaviTooltipsHook", false, {}, "Gemini:Hook-1.0")
+
 local knDataWindowPadding = 5
 local kItemTooltipWindowWidth = 350
 local kstrTab = "    "
@@ -318,6 +320,7 @@ local tConversion =
 
 local tStats =
 {
+	Bonus = {},
 	Runes = {},
 	Gear = {},
 	Buffs = {},
@@ -493,6 +496,7 @@ function TaviTooltips:OnDocumentReady()
 
 	self.timerGeneral = ApolloTimer.Create(1.0, true, "OnTimer", self)
 	self.timerGeneral:Stop()
+	
 
 	self:CreateCallNames()
 	TaviTooltipsHook:OnHooksReady()
@@ -503,7 +507,6 @@ end
 
 --GeminiHook things ... I don't know if half of this was even necessary, but at least it's not replacing Carbine's ToolTips, so compatability should be okay for dependancies
 
-TaviTooltipsHook = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("TaviTooltipsHook", false, {}, "Gemini:Hook-1.0")
 local bHooked = false
 
 function TaviTooltipsHook:OnHooksReady()
@@ -614,6 +617,7 @@ function TaviTooltips:DrawAttributes(wndUpdate)
 	tStats.Gear = {}
 	tStats.Buffs = {}
 	tStats.Budget = {}
+	tStats.Bonus = {}
 	
 	local unitPlayer = wndUpdate and wndUpdate:GetData() or nil
 
@@ -947,6 +951,7 @@ function TaviTooltips:GetStatSum()
 	local unitPlayer = GameLib.GetPlayerUnit()
 	if unitPlayer == nil then return end
 	
+	tStats.Bonus = {}
 	tStats.Runes = {}
 	tStats.Gear = {}
 	tStats.Buffs = {}
@@ -967,6 +972,8 @@ function TaviTooltips:GetStatSum()
 		["Multi-Hit Severity"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingMultiHitAmount).fValue,
 		["Vigor"]					= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingVigor).fValue
 	}
+	
+	--GameLib.GetPlayerUnit():GetEquippedItems()[1]:GetDetailedInfo().tPrimary.tRunes
 	
 	
 	local arGear = GameLib.GetPlayerUnit():GetEquippedItems()
@@ -998,7 +1005,7 @@ function TaviTooltips:GetStatSum()
 				for ir = 1, #arRunes do
 					if arRunes[ir].arProperties ~= nil and arRunes[ir].arProperties[1].nValue ~= nil then
 					--Print(arRunes[ir].arProperties[1].strName)
-					local propertyName = self:GetPropertyName(arRunes[ir].arProperties[1].strName)
+						local propertyName = self:GetPropertyName(arRunes[ir].arProperties[1].strName)
 					--Print(propertyName)
 						if tStats.Runes[propertyName] == 0 or tStats.Runes[propertyName] == nil then
 							tStats.Runes[propertyName] = arRunes[ir].arProperties[1].nValue
