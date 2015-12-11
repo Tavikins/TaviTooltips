@@ -956,7 +956,15 @@ function TaviTooltips:GetStatSum()
 	tStats.Gear = {}
 	tStats.Buffs = {}
 	tStats.Budget = {}
-	tStats.Base = {
+	tStats.Base= {
+		["Strikethrough"]			= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseAvoidReduceChance).fValue,
+		["Critical Hit Chance"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseCritChance).fValue,
+		["Critical Hit Severity"]	= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.CriticalHitSeverityMultiplier).fValue,
+		["Multi-Hit Chance"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseMultiHitChance).fValue,
+		["Multi-Hit Severity"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseMultiHitAmount).fValue,
+		["Vigor"]					= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.BaseVigor).fValue
+	}
+	tStats.Total = {
 		["Strikethrough"]			= unitPlayer:GetStrikethroughChance().nAmount,
 		["Critical Hit Chance"]		= unitPlayer:GetCritChance().nAmount,
 		["Critical Hit Severity"]	= unitPlayer:GetCritSeverity().nAmount,
@@ -964,7 +972,7 @@ function TaviTooltips:GetStatSum()
 		["Multi-Hit Severity"]		= unitPlayer:GetMultiHitAmount().nAmount,
 		["Vigor"]					= unitPlayer:GetVigor().nAmount
 	}
-	tStats.Total = { 
+	tStats.Rating = { 
 		["Strikethrough"]			= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_AvoidReduce).fValue,
 		["Critical Hit Chance"]		= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.Rating_CritChanceIncrease).fValue,
 		["Critical Hit Severity"]	= unitPlayer:GetUnitProperty(Unit.CodeEnumProperties.RatingCritSeverityIncrease).fValue,
@@ -1018,25 +1026,42 @@ function TaviTooltips:GetStatSum()
 		end
 	end
 	
-	for stat, value in pairs(tStats.Total) do
+	for _, i in pairs(Item.GetSetBonuses()) do
+		for _, v in pairs(i.arBonuses) do
+			if v.bIsActive and v.nValue ~= nil then
+				if tStats.Bonus[v.strName] == nil then tStats.Bonus[v.strName] = 0 end
+				tStats.Bonus[v.strName] = tStats.Bonus[v.strName] + v.nValue
+			end
+		end
+	end
+	
+	for stat, value in pairs(tStats.Rating) do
 		if tStats.Runes[stat] == nil then tStats.Runes[stat] = 0 end
 		if tStats.Gear[stat] == nil then tStats.Gear[stat] = 0 end
 		if tStats.Budget[stat] == nil then tStats.Budget[stat] = 0 end
+		if tStats.Bonus[stat] == nil then tStats.Bonus[stat] = 0 end
+		if tStats.Buffs[stat] == nil then tStats.Buffs[stat] = 0 end
 		
 		tStats.Gear[stat] = tStats.Budget[stat] - tStats.Runes[stat]
-		tStats.Buffs[stat] = tStats.Total[stat] - tStats.Budget[stat]
+		tStats.Buffs[stat] = tStats.Rating[stat] - tStats.Budget[stat]
 		
 		local GearPercent = tStats.Gear[stat] * tConversion[stat]
+		local RunesPercent = (tStats.Runes[stat] * tConversion[stat]) + (tStats.Bonus[stat] * 100)
 		local BuffsPercent = tStats.Buffs[stat] * tConversion[stat]
-		local RunesPercent = tStats.Runes[stat] * tConversion[stat]
-		--Print(GearPercent..","..BuffsPercent..","..RunesPercent)
-		tStats.Gear[stat] = GearPercent
+		local BasePercent = (tStats.Base[stat] * 100) - BuffsPercent
+		
 		tStats.Buffs[stat] = BuffsPercent
+		tStats.Gear[stat] = GearPercent
 		tStats.Runes[stat] = RunesPercent
-		tStats.Base[stat] = tStats.Base[stat] - GearPercent - BuffsPercent - RunesPercent
+		tStats.Base[stat] = BasePercent
+		
+		if tStats.Gear[stat] < .001 then tStats.Gear[stat] = 0 end
+		if tStats.Buffs[stat] < .001 then tStats.Buffs[stat] = 0 end
+		if tStats.Runes[stat] < .001 then tStats.Runes[stat] = 0 end
+		if tStats.Base[stat] < .001 then tStats.Base[stat] = 0 end
 	end
 
-	for stat, value in pairs(tStats.Total) do
+	for stat, value in pairs(tStats.Rating) do
 		--Print(stat.." : "..strRound(tStats.Total[stat], 1).." = "..strRound(tStats.Gear[stat], 1).." + "..strRound(tStats.Runes[stat], 1).." + "..strRound(tStats.Buffs[stat], 1))
 	end
 end
