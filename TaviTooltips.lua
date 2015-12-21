@@ -1045,10 +1045,11 @@ function TaviTooltips:GetStatSum()
 		tStats.Gear[stat] = tStats.Budget[stat] - tStats.Runes[stat]
 		tStats.Buffs[stat] = tStats.Rating[stat] - tStats.Budget[stat]
 		
+		local BonusPercent = tStats.Bonus[stat] * 100
 		local GearPercent = tStats.Gear[stat] * tConversion[stat]
-		local RunesPercent = (tStats.Runes[stat] * tConversion[stat]) + (tStats.Bonus[stat] * 100)
+		local RunesPercent = (tStats.Runes[stat] * tConversion[stat]) + BonusPercent
 		local BuffsPercent = tStats.Buffs[stat] * tConversion[stat]
-		local BasePercent = (tStats.Base[stat] * 100) - BuffsPercent
+		local BasePercent = (tStats.Base[stat] * 100) - BuffsPercent - BonusPercent
 		
 		tStats.Buffs[stat] = BuffsPercent
 		tStats.Gear[stat] = GearPercent
