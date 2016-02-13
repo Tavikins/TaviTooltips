@@ -866,7 +866,7 @@ function TaviTooltips:DrawAttributes(wndUpdate)
 			wndItemHolder:SetData(idxInner)
 			if tStats.Gear[tCurInner.strName] ~= nil and tStats.Runes[tCurInner.strName] ~= nil and tStats.Buffs[tCurInner.strName] ~= nil and tStats.Base[tCurInner.strName] ~= nil then
 				strFormattedValues = string.format("<P Align=\"Right\" Font=\"CRB_Header9\" TextColor=\"UI_TextHoloBody\"><T TextColor=\"xkcdBattleshipGrey\">%s%%</T>+<T TextColor=\"xkcdLightGrey\">%s%%</T>+<T TextColor=\"xkcdGreen\">%s%%</T>+<T TextColor=\"xkcdLightBlue\">%s%%</T>=",
-					strRound(tStats.Base[tCurInner.strName], 1), strRound(tStats.Gear[tCurInner.strName], 1), strRound(tStats.Runes[tCurInner.strName], 1), strRound(tStats.Buffs[tCurInner.strName], 1))
+					strRound(tStats.Base[tCurInner.strName], 2), strRound(tStats.Gear[tCurInner.strName], 2), strRound(tStats.Runes[tCurInner.strName], 2), strRound(tStats.Buffs[tCurInner.strName], 2))
 			else 
 				strFormattedValues = "<P Align=\"Right\" Font=\"CRB_Header9\">"
 			end
@@ -1049,7 +1049,7 @@ function TaviTooltips:GetStatSum()
 		local GearPercent = tStats.Gear[stat] * tConversion[stat]
 		local RunesPercent = (tStats.Runes[stat] * tConversion[stat]) + BonusPercent
 		local BuffsPercent = tStats.Buffs[stat] * tConversion[stat]
-		local BasePercent = (tStats.Base[stat] * 100) - BuffsPercent - BonusPercent
+		local BasePercent = (tStats.Base[stat] * 100) - BonusPercent
 		
 		tStats.Buffs[stat] = BuffsPercent
 		tStats.Gear[stat] = GearPercent
@@ -2914,9 +2914,15 @@ local function GenerateItemTooltipForm(luaCaller, wndParent, itemSource, tFlags,
 			strgear = string.format("<T TextColor=\"%s\">%s</T>", tSettings.GearColor, ngear)
 			strrunes = string.format("<T TextColor=\"%s\">%s</T>", tSettings.RuneColor, nrunes)
 
-			local strLineLeft = tostring("<P Align=\"Left\" Font=\"CRB_InterfaceSmall\">"..strprop..strdiff.."</P>")
-			local strLineRight = tostring("<P Align=\"Right\" Font=\"CRB_InterfaceSmall\">"..strleftbrace..strgear..strplussign..strrunes..strrightbrace..strequalsign..strtotal.."</P>")
+			local strLineLeft = ""
+			local strLineRight = ""
 			
+			strLineLeft = tostring("<P Align=\"Left\" Font=\"CRB_InterfaceSmall\">"..strprop..strdiff.."</P>")
+			if not tSettings.MergeRunes then
+				strLineRight = tostring("<P Align=\"Right\" Font=\"CRB_InterfaceSmall\">"..strleftbrace..strgear..strplussign..strrunes..strrightbrace..strequalsign..strtotal.."</P>")
+			else
+				strLineRight = tostring("<P Align=\"Right\" Font=\"CRB_InterfaceSmall\">"..strtotal.."</P>")	
+			end
 			--window is the original, which we modified, and overlay is the right-aligned bit
 			tpropinfo.window:SetAML(strLineLeft)
 			tpropinfo.window:SetHeightToContentHeight()
